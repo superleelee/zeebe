@@ -97,8 +97,7 @@ pipeline {
         }
 
         stage('Test') {
-            steps {
-                parallel {
+            parallel {
                 stage('Go') {
                   steps {
                     container('golang') {
@@ -179,27 +178,6 @@ pipeline {
                 }
               }
 
-                stage('QA Tests') {
-                environment {
-                  SUREFIRE_REPORT_NAME_SUFFIX = 'it'
-                }
-
-                steps {
-                  container('maven') {
-                    configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                      sh '.ci/scripts/distribution/it-java.sh'
-                    }
-                  }
-                }
-
-                post {
-                  always {
-                    junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
-                  }
-                }
-              }
-            }
-
             post {
                 failure {
                     zip zipFile: 'test-reports.zip', archive: true, glob: "**/*/surefire-reports/**"
@@ -209,6 +187,37 @@ pipeline {
                       if (fileExists('./target/FlakyTests.txt')) {
                           currentBuild.description = "Flaky Tests: <br>" + readFile('./target/FlakyTests.txt').split('\n').join('<br>')
                       }
+                    }
+                }
+            }
+        }
+
+        stage('QA Tests') {
+            environment {
+              SUREFIRE_REPORT_NAME_SUFFIX = 'it'
+            }
+
+            steps {
+              container('maven') {
+                configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                  sh '.ci/scripts/distribution/it-java.sh'
+                }
+              }
+            }
+
+            post {
+                always {
+                    junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                }
+
+                failure {
+                    zip zipFile: 'test-reports.zip', archive: true, glob: "**/*/surefire-reports/**"
+                    archive "**/hs_err_*.log"
+
+                    script {
+                        if (fileExists('./target/FlakyTests.txt')) {
+                          currentBuild.description = "Flaky Tests: <br>" + readFile('./target/FlakyTests.txt').split('\n').join('<br>')
+                        }
                     }
                 }
             }
