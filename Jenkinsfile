@@ -97,126 +97,119 @@ pipeline {
         }
 
         stage('Test') {
-            parallel {
-                stage('Go') {
-                  steps {
-                    container('golang') {
-                      sh '.ci/scripts/distribution/build-go.sh'
+            stages {
+                stage('Non QA Tests') {
+                    parallel {
+                    stage('Go') {
+                      steps {
+                        container('golang') {
+                          sh '.ci/scripts/distribution/build-go.sh'
+                        }
+
+                        container('golang') {
+                          sh '.ci/scripts/distribution/test-go.sh'
+                        }
+                      }
+
+                      post {
+                        always {
+                          junit testResults: "**/*/TEST-go.xml", keepLongStdio: true
+                        }
+                      }
                     }
 
-                    container('golang') {
-                      sh '.ci/scripts/distribution/test-go.sh'
+                    stage('Analyse (Java)') {
+                      steps {
+                        container('maven') {
+                          configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                            sh '.ci/scripts/distribution/analyse-java.sh'
+                          }
+                        }
+                      }
                     }
-                  }
 
-                  post {
-                    always {
-                      junit testResults: "**/*/TEST-go.xml", keepLongStdio: true
+                    stage('Unit (Java)') {
+                      environment {
+                        SUREFIRE_REPORT_NAME_SUFFIX = 'java'
+                      }
+
+                      steps {
+                        container('maven') {
+                          configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                            sh '.ci/scripts/distribution/test-java.sh'
+                          }
+                        }
+                      }
+
+                      post {
+                        always {
+                          junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                        }
+                      }
                     }
-                  }
-                }
 
-                stage('Analyse (Java)') {
-                  steps {
-                    container('maven') {
-                      configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                        sh '.ci/scripts/distribution/analyse-java.sh'
+                    stage('Unit 8 (Java 8)') {
+                      environment {
+                        SUREFIRE_REPORT_NAME_SUFFIX = 'java8'
+                      }
+
+                      steps {
+                        container('maven-jdk8') {
+                          configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                            sh '.ci/scripts/distribution/test-java8.sh'
+                          }
+                        }
+                      }
+
+                      post {
+                        always {
+                          junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                        }
+                      }
+                    }
+
+                    stage('Build Docs') {
+                      steps {
+                        retry(3) {
+                          container('maven') {
+                            sh '.ci/scripts/docs/prepare.sh'
+                            sh '.ci/scripts/docs/build.sh'
+                          }
+                        }
                       }
                     }
                   }
                 }
 
-                stage('Unit (Java)') {
-                  environment {
-                    SUREFIRE_REPORT_NAME_SUFFIX = 'java'
-                  }
-
-                  steps {
-                    container('maven') {
-                      configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                        sh '.ci/scripts/distribution/test-java.sh'
-                      }
+                stage('QA Tests') {
+                    environment {
+                      SUREFIRE_REPORT_NAME_SUFFIX = 'it'
                     }
-                  }
 
-                  post {
-                    always {
-                      junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                    steps {
+                        container('maven') {
+                            configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                            sh '.ci/scripts/distribution/it-java.sh'
+                          }
+                        }
                     }
-                  }
-                }
 
-                stage('Unit 8 (Java 8)') {
-                  environment {
-                    SUREFIRE_REPORT_NAME_SUFFIX = 'java8'
-                  }
-
-                  steps {
-                    container('maven-jdk8') {
-                      configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                        sh '.ci/scripts/distribution/test-java8.sh'
-                      }
-                    }
-                  }
-
-                  post {
-                    always {
-                      junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
-                    }
-                  }
-                }
-
-                stage('Build Docs') {
-                  steps {
-                    retry(3) {
-                      container('maven') {
-                        sh '.ci/scripts/docs/prepare.sh'
-                        sh '.ci/scripts/docs/build.sh'
-                      }
-                    }
-                  }
-                }
-              }
-
-            post {
-                failure {
-                    zip zipFile: 'test-reports.zip', archive: true, glob: "**/*/surefire-reports/**"
-                    archive "**/hs_err_*.log"
-
-                    script {
-                      if (fileExists('./target/FlakyTests.txt')) {
-                          currentBuild.description = "Flaky Tests: <br>" + readFile('./target/FlakyTests.txt').split('\n').join('<br>')
-                      }
+                    post {
+                        always {
+                            junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                        }
                     }
                 }
-            }
-        }
-
-        stage('QA Tests') {
-            environment {
-              SUREFIRE_REPORT_NAME_SUFFIX = 'it'
-            }
-
-            steps {
-              container('maven') {
-                configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                  sh '.ci/scripts/distribution/it-java.sh'
-                }
-              }
             }
 
             post {
-                always {
-                    junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
-                }
-
                 failure {
                     zip zipFile: 'test-reports.zip', archive: true, glob: "**/*/surefire-reports/**"
                     archive "**/hs_err_*.log"
 
                     script {
                         if (fileExists('./target/FlakyTests.txt')) {
-                          currentBuild.description = "Flaky Tests: <br>" + readFile('./target/FlakyTests.txt').split('\n').join('<br>')
+                            currentBuild.description = "Flaky Tests: <br>" + readFile('./target/FlakyTests.txt').split('\n').join('<br>')
                         }
                     }
                 }
