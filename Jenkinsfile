@@ -58,37 +58,21 @@ pipeline {
                 container('maven') {
                     sh '.ci/scripts/distribution/prepare.sh'
                 }
-                container('maven-qa') {
-                sh '.ci/scripts/distribution/prepare.sh'
-              }
                 container('maven-jdk8') {
                     sh '.ci/scripts/distribution/prepare.sh'
                 }
                 container('golang') {
                     sh '.ci/scripts/distribution/prepare-go.sh'
                 }
+
             }
         }
 
-        stage('Build') {
-            parallel {
-                stage('Maven') {
-                    steps {
-                        container('maven') {
-                            configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                                sh '.ci/scripts/distribution/build-java.sh'
-                            }
-                        }
-                    }
-                }
-
-                stage('Maven QA') {
-                    steps {
-                        container('maven-qa') {
-                            configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                                sh '.ci/scripts/distribution/build-java.sh'
-                            }
-                        }
+        stage('Build (Java)') {
+            steps {
+                container('maven') {
+                    configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                        sh '.ci/scripts/distribution/build-java.sh'
                     }
                 }
             }
@@ -106,11 +90,6 @@ pipeline {
                     sh 'cp dist/target/zeebe-distribution-*.tar.gz zeebe-distribution.tar.gz'
                 }
 
-                // probably not necessary since we really only care about the image being available
-                container('maven-qa') {
-                    sh 'cp dist/target/zeebe-distribution-*.tar.gz zeebe-distribution.tar.gz'
-                }
-
                 container('docker') {
                     sh '.ci/scripts/docker/build.sh'
                 }
@@ -118,7 +97,9 @@ pipeline {
         }
 
         stage('Test') {
-            parallel {
+            stages {
+                stage('Non QA Tests') {
+                    parallel {
                     stage('Go') {
                       steps {
                         container('golang') {
@@ -137,7 +118,7 @@ pipeline {
                       }
                     }
 
-                    stage('Static Analysis') {
+                    stage('Analyse (Java)') {
                       steps {
                         container('maven') {
                           configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
@@ -147,7 +128,7 @@ pipeline {
                       }
                     }
 
-                    stage('Non QA Tests') {
+                    stage('Unit (Java)') {
                       environment {
                         SUREFIRE_REPORT_NAME_SUFFIX = 'java'
                       }
@@ -167,27 +148,7 @@ pipeline {
                       }
                     }
 
-                    stage('QA Tests') {
-                        environment {
-                            SUREFIRE_REPORT_NAME_SUFFIX = 'it'
-                        }
-
-                        steps {
-                            container('maven-qa') {
-                                configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                                sh '.ci/scripts/distribution/it-java.sh'
-                              }
-                            }
-                        }
-
-                        post {
-                            always {
-                                junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
-                            }
-                        }
-                    }
-
-                    stage('Java 8 Tests') {
+                    stage('Unit 8 (Java 8)') {
                       environment {
                         SUREFIRE_REPORT_NAME_SUFFIX = 'java8'
                       }
@@ -217,7 +178,29 @@ pipeline {
                         }
                       }
                     }
+                  }
                 }
+
+                stage('QA Tests') {
+                    environment {
+                      SUREFIRE_REPORT_NAME_SUFFIX = 'it'
+                    }
+
+                    steps {
+                        container('maven') {
+                            configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                            sh '.ci/scripts/distribution/it-java.sh'
+                          }
+                        }
+                    }
+
+                    post {
+                        always {
+                            junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                        }
+                    }
+                }
+            }
 
             post {
                 failure {
