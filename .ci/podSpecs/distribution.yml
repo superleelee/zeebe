@@ -100,11 +100,11 @@ spec:
       tty: true
       resources:
         limits:
-          cpu: 8
-          memory: 16Gi
+          cpu: 16
+          memory: 32Gi
         requests:
-          cpu: 8
-          memory: 16Gi
+          cpu: 16
+          memory: 32Gi
       volumeMounts:
         - name: shared-data
           mountPath: /home/shared
