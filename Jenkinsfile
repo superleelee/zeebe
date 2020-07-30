@@ -97,7 +97,7 @@ pipeline {
         }
 
         stage('Test') {
-            stage('Non QA Tests') {
+            steps {
                 parallel {
                 stage('Go') {
                   steps {
@@ -178,26 +178,26 @@ pipeline {
                   }
                 }
               }
-            }
 
-            stage('QA Tests') {
+                stage('QA Tests') {
                 environment {
-                    SUREFIRE_REPORT_NAME_SUFFIX = 'it'
+                  SUREFIRE_REPORT_NAME_SUFFIX = 'it'
                 }
 
                 steps {
-                    container('maven') {
-                        configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                            sh '.ci/scripts/distribution/it-java.sh'
-                        }
+                  container('maven') {
+                    configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                      sh '.ci/scripts/distribution/it-java.sh'
                     }
+                  }
                 }
 
                 post {
-                    always {
-                        junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
-                    }
+                  always {
+                    junit testResults: "**/*/TEST*${SUREFIRE_REPORT_NAME_SUFFIX}.xml", keepLongStdio: true
+                  }
                 }
+              }
             }
 
             post {
