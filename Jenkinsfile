@@ -72,24 +72,10 @@ pipeline {
         }
 
         stage('Build (Java)') {
-          parallel {
-            stage('Maven') {
-              steps {
-                container('maven') {
-                  configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                    sh '.ci/scripts/distribution/build-java.sh'
-                  }
-                }
-              }
-            }
-
-            stage('Maven QA') {
-              steps {
-                container('maven-qa') {
-                  configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
-                    sh '.ci/scripts/distribution/build-java.sh'
-                  }
-                }
+          steps {
+            container('maven') {
+              configFileProvider([configFile(fileId: 'maven-nexus-settings-zeebe', variable: 'MAVEN_SETTINGS_XML')]) {
+                sh '.ci/scripts/distribution/build-java.sh'
               }
             }
           }
