@@ -30,11 +30,40 @@ spec:
           value: /home/shared
       resources:
         limits:
-          cpu: 8
-          memory: 32Gi
+          cpu: 6
+          memory: 24Gi
         requests:
-          cpu: 8
-          memory: 32Gi
+          cpu: 6
+          memory: 24Gi
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: shared-data
+          mountPath: /home/shared
+          mountPropagation: Bidirectional
+    - name: maven-qa
+      image: maven:3.6.0-jdk-11
+      command: ["cat"]
+      tty: true
+      env:
+        - name: LIMITS_CPU
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+        - name: JAVA_TOOL_OPTIONS
+          value: |
+            -XX:+UseContainerSupport
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        - name: ZEEBE_CI_SHARED_DATA
+          value: /home/shared
+      resources:
+        limits:
+          cpu: 6
+          memory: 24Gi
+        requests:
+          cpu: 6
+          memory: 24Gi
       securityContext:
         privileged: true
       volumeMounts:
@@ -76,10 +105,10 @@ spec:
       tty: true
       resources:
         limits:
-          cpu: 3
+          cpu: 2
           memory: 2Gi
         requests:
-          cpu: 3
+          cpu: 2
           memory: 2Gi
       env:
         - name: DOCKER_HOST
@@ -100,11 +129,11 @@ spec:
       tty: true
       resources:
         limits:
-          cpu: 16
-          memory: 32Gi
+          cpu: 12
+          memory: 24Gi
         requests:
-          cpu: 16
-          memory: 32Gi
+          cpu: 12
+          memory: 24Gi
       volumeMounts:
         - name: shared-data
           mountPath: /home/shared
