@@ -198,6 +198,11 @@ public class NamespaceImpl implements Namespace, KryoFactory, KryoPool {
     }
   }
 
+  @Override
+  public ImmutableList<RegistrationBlock> getRegisteredBlocks() {
+    return registeredBlocks;
+  }
+
   private String friendlyName() {
     return friendlyName;
   }
@@ -334,14 +339,19 @@ public class NamespaceImpl implements Namespace, KryoFactory, KryoPool {
     private ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
     private boolean registrationRequired = true;
     private boolean compatible = false;
+    private String name = NO_NAME;
 
     /**
      * Builds a {@link Namespace} instance.
      *
      * @return KryoNamespace
      */
-    public Namespace build() {
-      return build(NO_NAME);
+    public NamespaceImpl build() {
+      if (!types.isEmpty()) {
+        blocks.add(new RegistrationBlock(this.blockHeadId, types));
+      }
+      return new NamespaceImpl(blocks, classLoader, registrationRequired, compatible, name)
+          .populate(1);
     }
 
     /**
@@ -351,11 +361,17 @@ public class NamespaceImpl implements Namespace, KryoFactory, KryoPool {
      * @return KryoNamespace
      */
     public NamespaceImpl build(final String friendlyName) {
-      if (!types.isEmpty()) {
-        blocks.add(new RegistrationBlock(this.blockHeadId, types));
-      }
-      return new NamespaceImpl(blocks, classLoader, registrationRequired, compatible, friendlyName)
-          .populate(1);
+      this.name = friendlyName;
+      return build();
+    }
+
+    public Builder name(final String name) {
+      this.name = name;
+      return this;
+    }
+
+    public String getName() {
+      return name;
     }
 
     /**
@@ -436,14 +452,14 @@ public class NamespaceImpl implements Namespace, KryoFactory, KryoPool {
      * @param ns KryoNamespace
      * @return this
      */
-    public Builder register(final NamespaceImpl ns) {
-
-      if (blocks.containsAll(ns.registeredBlocks)) {
+    public Builder register(final Namespace ns) {
+      if (blocks.containsAll(ns.getRegisteredBlocks())) {
         // Everything was already registered.
         LOGGER.debug("Ignoring {}, already registered.", ns);
         return this;
       }
-      for (final RegistrationBlock block : ns.registeredBlocks) {
+
+      for (final RegistrationBlock block : ns.getRegisteredBlocks()) {
         this.register(block);
       }
       return this;
@@ -485,6 +501,24 @@ public class NamespaceImpl implements Namespace, KryoFactory, KryoPool {
     public Builder setRegistrationRequired(final boolean registrationRequired) {
       this.registrationRequired = registrationRequired;
       return this;
+    }
+
+    /**
+     * Creates a copy of the builder.
+     *
+     * @return copy of this builder
+     */
+    public Builder copy() {
+      final Builder copy = new Builder();
+      copy.blockHeadId = blockHeadId;
+      copy.blocks.addAll(blocks);
+      copy.classLoader = classLoader;
+      copy.compatible = compatible;
+      copy.types.addAll(types);
+      copy.registrationRequired = registrationRequired;
+      copy.name = name;
+
+      return copy;
     }
   }
 
