@@ -57,6 +57,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.util.concurrent.Future;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.security.Key;
 import java.security.KeyStore;
@@ -91,6 +92,8 @@ import org.slf4j.LoggerFactory;
 /** Netty based MessagingService. */
 public class NettyMessagingService implements ManagedMessagingService {
 
+  private static final String ERROR_MSG_BIND_FAILURE =
+      "Failed to bind TCP server to %s:%d due to %s";
   protected boolean enableNettyTls;
   protected TrustManagerFactory trustManager;
   protected KeyManagerFactory keyManager;
@@ -718,12 +721,11 @@ public class NettyMessagingService implements ManagedMessagingService {
                       serverChannel = f.channel();
                       bind(bootstrap, ifaces, port, future);
                     } else {
-                      log.warn(
-                          "Failed to bind TCP server to port {}:{} due to {}",
-                          iface,
-                          port,
-                          f.cause());
-                      future.completeExceptionally(f.cause());
+                      final var error = f.cause();
+                      final var errorMsg =
+                          String.format(ERROR_MSG_BIND_FAILURE, iface, port, error.getMessage());
+                      log.warn(errorMsg);
+                      future.completeExceptionally(new IOException(errorMsg, error));
                     }
                   });
     } else {
