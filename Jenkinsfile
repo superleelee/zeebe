@@ -7,7 +7,7 @@ def buildName = "${env.JOB_BASE_NAME.replaceAll("%2F", "-").replaceAll("\\.", "-
 def masterBranchName = 'master'
 def isMasterBranch = env.BRANCH_NAME == masterBranchName
 def developBranchName = 'develop'
-def isDevelopBranch = env.BRANCH_NAME == developBranchName
+def isDevelopBranch = env.BRANCH_NAME == 'zell-hunt-flakiness'
 
 //for develop branch keep builds for 7 days to be able to analyse build errors, for all other branches, keep the last 10 builds
 def daysToKeep = isDevelopBranch ? '7' : '-1'
