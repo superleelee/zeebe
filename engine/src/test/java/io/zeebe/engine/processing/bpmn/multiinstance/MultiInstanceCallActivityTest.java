@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.zeebe.engine.util.EngineRule;
 import io.zeebe.model.bpmn.Bpmn;
 import io.zeebe.model.bpmn.BpmnModelInstance;
+import io.zeebe.model.bpmn.builder.CallActivityBuilder;
 import io.zeebe.protocol.record.Record;
 import io.zeebe.protocol.record.intent.JobIntent;
 import io.zeebe.protocol.record.intent.WorkflowInstanceIntent;
@@ -19,6 +20,7 @@ import io.zeebe.protocol.record.value.BpmnElementType;
 import io.zeebe.test.util.BrokerClassRuleHelper;
 import io.zeebe.test.util.record.RecordingExporter;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import org.junit.Before;
 import org.junit.ClassRule;
@@ -36,21 +38,20 @@ public final class MultiInstanceCallActivityTest {
   private static final String INPUT_COLLECTION_VARIABLE = "items";
   private static final List<Integer> INPUT_COLLECTION = List.of(10, 20, 30);
 
-  private static final BpmnModelInstance PARENT_WORKFLOW =
-      Bpmn.createExecutableProcess(PROCESS_ID_PARENT)
-          .startEvent()
-          .callActivity(
-              CALL_ACTIVITY_ID,
-              c ->
-                  c.zeebeProcessId(PROCESS_ID_CHILD)
-                      .multiInstance(
-                          b -> b.zeebeInputCollectionExpression(INPUT_COLLECTION_VARIABLE)))
-          .endEvent()
-          .done();
-
   @Rule public final BrokerClassRuleHelper helper = new BrokerClassRuleHelper();
-
   private String jobType;
+
+  private static BpmnModelInstance parentWorkflowWithCallActivity(
+      final Consumer<CallActivityBuilder> callActivityBuilder) {
+    final CallActivityBuilder workflow =
+        Bpmn.createExecutableProcess(PROCESS_ID_PARENT)
+            .startEvent()
+            .callActivity(CALL_ACTIVITY_ID, c -> c.zeebeProcessId(PROCESS_ID_CHILD));
+
+    callActivityBuilder.accept(workflow);
+
+    return workflow.endEvent().done();
+  }
 
   @Before
   public void init() {
@@ -63,9 +64,15 @@ public final class MultiInstanceCallActivityTest {
             .endEvent()
             .done();
 
+    final var parentWorkflow =
+        parentWorkflowWithCallActivity(
+            callActivity ->
+                callActivity.multiInstance(
+                    b -> b.zeebeInputCollectionExpression(INPUT_COLLECTION_VARIABLE)));
+
     ENGINE
         .deployment()
-        .withXmlResource("wf-parent.bpmn", PARENT_WORKFLOW)
+        .withXmlResource("wf-parent.bpmn", parentWorkflow)
         .withXmlResource("wf-child.bpmn", childWorkflow)
         .deploy();
   }
@@ -183,6 +190,58 @@ public final class MultiInstanceCallActivityTest {
             BpmnElementType.CALL_ACTIVITY,
             BpmnElementType.MULTI_INSTANCE_BODY,
             BpmnElementType.PROCESS);
+  }
+
+  @Test
+  public void shouldCollectOutputFromChildInstance() {
+    // given
+    final var expectedOutputCollection = "[1,2,3]";
+
+    final BpmnModelInstance parentWorkflow =
+        parentWorkflowWithCallActivity(
+            callActivity ->
+                callActivity
+                    .zeebeInputExpression("loopCounter", "result")
+                    .multiInstance(
+                        b ->
+                            b.zeebeInputCollectionExpression(INPUT_COLLECTION_VARIABLE)
+                                .zeebeOutputElementExpression("result")
+                                .zeebeOutputCollection("results")));
+
+    ENGINE.deployment().withXmlResource("wf-parent.bpmn", parentWorkflow).deploy();
+
+    final long workflowInstanceKey =
+        ENGINE
+            .workflowInstance()
+            .ofBpmnProcessId(PROCESS_ID_PARENT)
+            .withVariable(INPUT_COLLECTION_VARIABLE, INPUT_COLLECTION)
+            .create();
+
+    // when
+    awaitJobsCreated(INPUT_COLLECTION.size());
+
+    ENGINE
+        .jobs()
+        .withType(jobType)
+        .activate()
+        .getValue()
+        .getJobKeys()
+        .forEach(jobKey -> ENGINE.job().withKey(jobKey).complete());
+
+    RecordingExporter.workflowInstanceRecords(WorkflowInstanceIntent.ELEMENT_COMPLETED)
+        .withWorkflowInstanceKey(workflowInstanceKey)
+        .withElementType(BpmnElementType.MULTI_INSTANCE_BODY)
+        .await();
+
+    // then
+    assertThat(
+            RecordingExporter.records()
+                .limitToWorkflowInstance(workflowInstanceKey)
+                .variableRecords()
+                .withName("results")
+                .withScopeKey(workflowInstanceKey))
+        .extracting(r -> r.getValue().getValue())
+        .containsExactly(expectedOutputCollection);
   }
 
   private void awaitJobsCreated(final int size) {
