@@ -136,7 +136,14 @@ public final class CallActivityProcessor
     switch (currentState) {
       case ELEMENT_ACTIVATED:
         stateTransitionBehavior.transitionToCompleting(callActivityContext);
-        stateBehavior.propagateTemporaryVariables(childContext, callActivityContext);
+
+        // don't copy all child variables to the parent unless output mappings are defined,
+        // or the option is explicitly enabled
+        if (element.getOutputMappings().isPresent()
+            || element.isPropagateAllChildVariablesEnabled()) {
+          stateBehavior.propagateTemporaryVariables(childContext, callActivityContext);
+        }
+
         break;
       case ELEMENT_TERMINATING:
         // the call activity is already terminating, it doesn't matter that the child completed

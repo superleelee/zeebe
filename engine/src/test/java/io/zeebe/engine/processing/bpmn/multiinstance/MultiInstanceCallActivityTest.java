@@ -20,6 +20,7 @@ import io.zeebe.protocol.record.value.BpmnElementType;
 import io.zeebe.test.util.BrokerClassRuleHelper;
 import io.zeebe.test.util.record.RecordingExporter;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import org.junit.Before;
@@ -195,13 +196,11 @@ public final class MultiInstanceCallActivityTest {
   @Test
   public void shouldCollectOutputFromChildInstance() {
     // given
-    final var expectedOutputCollection = "[1,2,3]";
-
     final BpmnModelInstance parentWorkflow =
         parentWorkflowWithCallActivity(
             callActivity ->
                 callActivity
-                    .zeebeInputExpression("loopCounter", "result")
+                    .zeebeOutputExpression("x", "result")
                     .multiInstance(
                         b ->
                             b.zeebeInputCollectionExpression(INPUT_COLLECTION_VARIABLE)
@@ -220,13 +219,21 @@ public final class MultiInstanceCallActivityTest {
     // when
     awaitJobsCreated(INPUT_COLLECTION.size());
 
+    final var jobCounter = new AtomicInteger();
+
     ENGINE
         .jobs()
         .withType(jobType)
         .activate()
         .getValue()
         .getJobKeys()
-        .forEach(jobKey -> ENGINE.job().withKey(jobKey).complete());
+        .forEach(
+            jobKey ->
+                ENGINE
+                    .job()
+                    .withKey(jobKey)
+                    .withVariable("x", jobCounter.incrementAndGet())
+                    .complete());
 
     RecordingExporter.workflowInstanceRecords(WorkflowInstanceIntent.ELEMENT_COMPLETED)
         .withWorkflowInstanceKey(workflowInstanceKey)
@@ -241,7 +248,7 @@ public final class MultiInstanceCallActivityTest {
                 .withName("results")
                 .withScopeKey(workflowInstanceKey))
         .extracting(r -> r.getValue().getValue())
-        .containsExactly(expectedOutputCollection);
+        .containsExactly("[1,2,3]");
   }
 
   private void awaitJobsCreated(final int size) {
