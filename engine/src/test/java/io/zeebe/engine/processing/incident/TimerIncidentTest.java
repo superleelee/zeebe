@@ -126,11 +126,7 @@ public final class TimerIncidentTest {
         .hasElementInstanceKey(elementInstance.getKey())
         .hasElementId(elementInstance.getValue().getElementId())
         .hasErrorType(ErrorType.EXTRACT_VALUE_ERROR)
-        .hasErrorMessage(
-            "Expected result of the expression '"
-                + DURATION_VARIABLE
-                + "' to be parsed to a duration, but was 'not_a_duration_expression'"
-                + " and encountered error: Text cannot be parsed to a Period");
+        .hasErrorMessage("Invalid duration format 'not_a_duration_expression'");
   }
 
   @Test

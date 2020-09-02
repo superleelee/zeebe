@@ -130,10 +130,7 @@ public final class ExpressionProcessor {
           return Either.right(Interval.parse(result.getString()));
         } catch (final DateTimeParseException e) {
           return Either.left(
-              new Failure(
-                  String.format(
-                      "Expected result of the expression '%s' to be parsed to a duration, but was '%s' and encountered error: %s",
-                      expression.getExpression(), result.getString(), e.getMessage())));
+              new Failure(String.format("Invalid duration format '%s'", result.getString())));
         }
       default:
         final var expected = List.of(ResultType.DURATION, ResultType.PERIOD, ResultType.STRING);
@@ -165,7 +162,12 @@ public final class ExpressionProcessor {
       return Either.right(result.getDateTime());
     }
     if (result.getType() == ResultType.STRING) {
-      return Either.right(ZonedDateTime.parse(result.getString()));
+      try {
+        return Either.right(ZonedDateTime.parse(result.getString()));
+      } catch (final DateTimeParseException e) {
+        return Either.left(
+            new Failure(String.format("Invalid date-time format '%s'", result.getString())));
+      }
     }
     final var expected = List.of(ResultType.DATE_TIME, ResultType.STRING);
     return Either.left(
