@@ -8,7 +8,7 @@
 package io.zeebe.engine.processing.deployment.model.validation;
 
 import static io.zeebe.engine.processing.deployment.model.validation.ExpectedValidationResult.expect;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import io.zeebe.el.ExpressionLanguage;
 import io.zeebe.el.ExpressionLanguageFactory;
@@ -16,246 +16,245 @@ import io.zeebe.engine.processing.common.ExpressionProcessor;
 import io.zeebe.engine.processing.common.ExpressionProcessor.VariablesLookup;
 import io.zeebe.model.bpmn.Bpmn;
 import io.zeebe.model.bpmn.BpmnModelInstance;
-import io.zeebe.model.bpmn.instance.BoundaryEvent;
-import io.zeebe.model.bpmn.instance.IntermediateCatchEvent;
+import io.zeebe.model.bpmn.builder.AbstractCatchEventBuilder;
 import io.zeebe.model.bpmn.instance.StartEvent;
 import io.zeebe.model.bpmn.instance.TimerEventDefinition;
 import io.zeebe.model.bpmn.traversal.ModelWalker;
 import io.zeebe.model.bpmn.validation.ValidationVisitor;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
+import java.util.Collection;
+import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.camunda.bpm.model.xml.validation.ValidationResult;
+import java.util.stream.Stream;
 import org.camunda.bpm.model.xml.validation.ValidationResults;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameter;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
-@RunWith(Parameterized.class)
 public final class TimerValidationTest {
 
-  private static final String INVALID_EXPRESSION = "?!";
-  private static final String INVALID_EXPRESSION_MESSAGE =
-      "failed to parse expression '?!': [1.2] failure: end of input expected\n"
-          + "\n"
-          + "?!\n"
-          + " ^";
+  @ParameterizedTest(name = "[{index}] {0}")
+  @MethodSource("timerEvents")
+  @DisplayName("static timer expression with invalid cycle format")
+  public void invalidCycleFormat(
+      final String timerEventElementId, final AbstractCatchEventBuilder<?, ?> timerEventBuilder) {
 
-  public BpmnModelInstance modelInstance;
+    final var workflow = timerEventBuilder.timerWithCycle("foo").done();
 
-  @Parameter(0)
-  public Object modelSource;
+    validateWorkflow(
+        workflow,
+        expect(
+            timerEventElementId,
+            "Invalid timer cycle expression (Repetition spec must start with R)"));
+  }
 
-  @Parameter(1)
-  public List<ExpectedValidationResult> expectedResults;
+  @ParameterizedTest(name = "[{index}] {0}")
+  @MethodSource("timerEvents")
+  @DisplayName("static timer expression with invalid duration format")
+  public void invalidDurationFormat(
+      final String timerEventElementId, final AbstractCatchEventBuilder<?, ?> timerEventBuilder) {
 
-  @Parameters(name = "{index}: {1}")
-  public static Object[][] parameters() {
-    return new Object[][] {
-      {
-        // timer start event with invalid cycle
-        Bpmn.createExecutableProcess("process").startEvent().timerWithCycle("foo").done(),
-        Arrays.asList(
-            expect(
-                StartEvent.class,
-                "Invalid timer cycle expression (Repetition spec must start with R)"))
-      },
-      {
-        // timer start event with cycle expression that references a variable
-        Bpmn.createExecutableProcess("process").startEvent().timerWithCycleExpression("x").done(),
-        Arrays.asList(
-            expect(
-                StartEvent.class,
-                "Invalid timer cycle expression (failed to evaluate expression 'x': no variable found for name 'x')"))
-      },
-      {
-        // timer start event with not parsable cycle expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .timerWithCycleExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(
-            expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE),
-            expect(
-                StartEvent.class,
-                "Invalid timer cycle expression (" + INVALID_EXPRESSION_MESSAGE + ")"))
-      },
-      {
-        // timer start event with invalid date
-        Bpmn.createExecutableProcess("process").startEvent().timerWithDate("foo").done(),
-        Arrays.asList(
-            expect(
-                StartEvent.class, "Invalid timer date expression (Invalid date-time format 'foo')"))
-      },
-      {
-        // timer start event with invalid date expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .timerWithDateExpression("\"foo\"")
-            .done(),
-        Arrays.asList(
-            expect(
-                StartEvent.class, "Invalid timer date expression (Invalid date-time format 'foo')"))
-      },
-      {
-        // timer start event with date expression that references a variable
-        Bpmn.createExecutableProcess("process").startEvent().timerWithDateExpression("x").done(),
-        Arrays.asList(
-            expect(
-                StartEvent.class,
-                "Invalid timer date expression (failed to evaluate expression 'x': no variable found for name 'x')"))
-      },
-      {
-        // timer start event with not parsable date expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .timerWithDateExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(
-            expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE),
-            expect(
-                StartEvent.class,
-                "Invalid timer date expression (" + INVALID_EXPRESSION_MESSAGE + ")"))
-      },
-      {
-        // timer boundary event with invalid cycle
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithCycle("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                BoundaryEvent.class,
-                "Invalid timer cycle expression (Repetition spec must start with R)"))
-      },
-      {
-        // timer boundary event with not parsable cycle expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithCycleExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-      {
-        // timer boundary event with invalid duration
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithDuration("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                BoundaryEvent.class,
-                "Invalid timer duration expression (Invalid duration format 'foo')"))
-      },
-      {
-        // timer boundary event with not parsable duration expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithDurationExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-      {
-        // timer boundary event with invalid date
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithDate("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                BoundaryEvent.class,
-                "Invalid timer date expression (Invalid date-time format 'foo')"))
-      },
-      {
-        // timer boundary event with not parsable date expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .serviceTask("task", t -> t.zeebeJobType("test"))
-            .boundaryEvent()
-            .timerWithDateExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-      {
-        // timer intermediate event with invalid cycle
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithCycle("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                IntermediateCatchEvent.class,
-                "Invalid timer cycle expression (Repetition spec must start with R)"))
-      },
-      {
-        // timer intermediate event with not parsable cycle expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithCycleExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-      {
-        // timer intermediate event with invalid duration
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithDuration("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                IntermediateCatchEvent.class,
-                "Invalid timer duration expression (Invalid duration format 'foo')"))
-      },
-      {
-        // timer intermediate event with not parsable duration expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithDurationExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-      {
-        // timer intermediate event with invalid date
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithDate("foo")
-            .done(),
-        Arrays.asList(
-            expect(
-                IntermediateCatchEvent.class,
-                "Invalid timer date expression (Invalid date-time format 'foo')"))
-      },
-      {
-        // timer intermediate event with not parsable date expression
-        Bpmn.createExecutableProcess("process")
-            .startEvent()
-            .intermediateCatchEvent()
-            .timerWithDateExpression(INVALID_EXPRESSION)
-            .done(),
-        Arrays.asList(expect(TimerEventDefinition.class, INVALID_EXPRESSION_MESSAGE))
-      },
-    };
+    final var workflow = timerEventBuilder.timerWithDuration("foo").done();
+
+    validateWorkflow(
+        workflow,
+        expect(
+            timerEventElementId,
+            "Invalid timer duration expression (Invalid duration format 'foo')"));
+  }
+
+  @ParameterizedTest(name = "[{index}] {0}")
+  @MethodSource("timerEvents")
+  @DisplayName("static timer expression with invalid date format")
+  public void invalidDateFormat(
+      final String timerEventElementId, final AbstractCatchEventBuilder<?, ?> timerEventBuilder) {
+
+    final var workflow = timerEventBuilder.timerWithDate("foo").done();
+
+    validateWorkflow(
+        workflow,
+        expect(
+            timerEventElementId, "Invalid timer date expression (Invalid date-time format 'foo')"));
+  }
+
+  @ParameterizedTest(name = "[{index}] {1}")
+  @MethodSource("timerStartEventsWithExpression")
+  @DisplayName("timer expression of start event with variable access")
+  public void invalidStartEventExpressionWithVariable(
+      final String eventType,
+      final String timerType,
+      final Function<String, BpmnModelInstance> timerEventWithExpressionBuilder) {
+
+    final var workflow = timerEventWithExpressionBuilder.apply("x");
+
+    validateWorkflow(
+        workflow,
+        expect(
+            StartEvent.class,
+            "Invalid timer "
+                + timerType
+                + " expression (failed to evaluate expression 'x': no variable found for name 'x')"));
+  }
+
+  @ParameterizedTest(name = "[{index}] {0} with {1}")
+  @MethodSource("timerEventsWithExpression")
+  @DisplayName("timer expression is not parsable")
+  public void notParsableTimerExpression(
+      final String eventType,
+      final String timerType,
+      final Function<String, BpmnModelInstance> timerEventWithExpressionBuilder) {
+
+    final var workflow = timerEventWithExpressionBuilder.apply("!");
+
+    validateWorkflow(
+        workflow,
+        expect(
+            TimerEventDefinition.class,
+            "failed to parse expression '!': [1.1] failure: '{' expected but '!' found\n"
+                + "\n"
+                + "!\n"
+                + "^"));
+  }
+
+  private static Stream<Arguments> timerEvents() {
+    return Stream.of(
+        Arguments.of(
+            "start-event", Bpmn.createExecutableProcess("process").startEvent("start-event")),
+        Arguments.of(
+            "boundary-event",
+            Bpmn.createExecutableProcess("process")
+                .startEvent()
+                .serviceTask("task", t -> t.zeebeJobType("test"))
+                .boundaryEvent("boundary-event")),
+        Arguments.of(
+            "intermediate-catch-event",
+            Bpmn.createExecutableProcess("process")
+                .startEvent()
+                .intermediateCatchEvent("intermediate-catch-event")),
+        Arguments.of(
+            "event-sub-process",
+            Bpmn.createExecutableProcess("process")
+                .eventSubProcess("subprocess")
+                .startEvent("event-sub-process")));
+  }
+
+  private static Stream<Arguments> timerStartEventsWithExpression() {
+    return Stream.of(
+        Arguments.of(
+            "start event",
+            "cycle",
+            workflowBuilder(
+                expression ->
+                    Bpmn.createExecutableProcess("process")
+                        .startEvent()
+                        .timerWithCycleExpression(expression)
+                        .done())),
+        Arguments.of(
+            "start event",
+            "date",
+            workflowBuilder(
+                expression ->
+                    Bpmn.createExecutableProcess("process")
+                        .startEvent()
+                        .timerWithDateExpression(expression)
+                        .done())));
+  }
+
+  private static Stream<Arguments> timerEventsWithExpression() {
+    final var otherTimerEventsWithExpressions =
+        Stream.of(
+            Arguments.of(
+                "boundary event",
+                "duration",
+                workflowBuilder(
+                    expression ->
+                        Bpmn.createExecutableProcess("process")
+                            .startEvent()
+                            .serviceTask("task", t -> t.zeebeJobType("test"))
+                            .boundaryEvent("boundary-event")
+                            .timerWithDurationExpression(expression)
+                            .done())),
+            Arguments.of(
+                "boundary event",
+                "cycle",
+                workflowBuilder(
+                    expression ->
+                        Bpmn.createExecutableProcess("process")
+                            .startEvent()
+                            .serviceTask("task", t -> t.zeebeJobType("test"))
+                            .boundaryEvent("boundary-event")
+                            .timerWithCycleExpression(expression)
+                            .done())),
+            Arguments.of(
+                "intermediate catch event",
+                "duration",
+                workflowBuilder(
+                    expression ->
+                        Bpmn.createExecutableProcess("process")
+                            .startEvent()
+                            .intermediateCatchEvent("intermediate-catch-event")
+                            .timerWithDurationExpression(expression)
+                            .done())),
+            Arguments.of(
+                "event sub-process",
+                "duration",
+                workflowBuilder(
+                    expression ->
+                        Bpmn.createExecutableProcess("process")
+                            .eventSubProcess(
+                                "sub-process",
+                                subProcess ->
+                                    subProcess
+                                        .startEvent()
+                                        .timerWithDurationExpression(expression)
+                                        .endEvent())
+                            .startEvent()
+                            .endEvent()
+                            .done())),
+            Arguments.of(
+                "event sub-process",
+                "cycle",
+                workflowBuilder(
+                    expression ->
+                        Bpmn.createExecutableProcess("process")
+                            .eventSubProcess(
+                                "sub-process",
+                                subProcess ->
+                                    subProcess
+                                        .startEvent()
+                                        .timerWithCycleExpression(expression)
+                                        .endEvent())
+                            .startEvent()
+                            .endEvent()
+                            .done())));
+    return Stream.concat(timerStartEventsWithExpression(), otherTimerEventsWithExpressions);
+  }
+
+  private static Function<String, BpmnModelInstance> workflowBuilder(
+      final Function<String, BpmnModelInstance> builder) {
+    return builder;
+  }
+
+  private void validateWorkflow(
+      final BpmnModelInstance workflow, final ExpectedValidationResult expectation) {
+
+    Bpmn.validateModel(workflow);
+
+    final var validationResults =
+        validate(workflow).getResults().values().stream()
+            .flatMap(Collection::stream)
+            .collect(Collectors.toList());
+
+    final var validationResultsAsString =
+        validationResults.stream()
+            .map(ExpectedValidationResult::toString)
+            .collect(Collectors.joining(",\n"));
+
+    assertThat(validationResults)
+        .describedAs(
+            "Expected validation failure%n<%s>%n but actual validation validationResults was%n<%s>",
+            expectation, validationResultsAsString)
+        .anyMatch(expectation::matches);
   }
 
   private static ValidationResults validate(final BpmnModelInstance model) {
@@ -270,91 +269,5 @@ public final class TimerValidationTest {
     walker.walk(visitor);
 
     return visitor.getValidationResult();
-  }
-
-  @Before
-  public void prepareModel() {
-    if (modelSource instanceof BpmnModelInstance) {
-      modelInstance = (BpmnModelInstance) modelSource;
-    } else if (modelSource instanceof String) {
-      final InputStream modelStream =
-          TimerValidationTest.class.getResourceAsStream((String) modelSource);
-      modelInstance = Bpmn.readModelFromStream(modelStream);
-    } else {
-      throw new RuntimeException("Cannot convert parameter to bpmn model");
-    }
-  }
-
-  @Test
-  public void validateModel() {
-    // when
-    final ValidationResults results = validate(modelInstance);
-
-    Bpmn.validateModel(modelInstance);
-
-    // then
-    final List<ExpectedValidationResult> unmatchedExpectations = new ArrayList<>(expectedResults);
-    final List<ValidationResult> unmatchedResults =
-        results.getResults().values().stream()
-            .flatMap(l -> l.stream())
-            .collect(Collectors.toList());
-
-    match(unmatchedResults, unmatchedExpectations);
-
-    if (!unmatchedResults.isEmpty() || !unmatchedExpectations.isEmpty()) {
-      failWith(unmatchedExpectations, unmatchedResults);
-    }
-  }
-
-  private void match(
-      final List<ValidationResult> unmatchedResults,
-      final List<ExpectedValidationResult> unmatchedExpectations) {
-    final Iterator<ExpectedValidationResult> expectationIt = unmatchedExpectations.iterator();
-
-    outerLoop:
-    while (expectationIt.hasNext()) {
-      final ExpectedValidationResult currentExpectation = expectationIt.next();
-      final Iterator<ValidationResult> resultsIt = unmatchedResults.iterator();
-
-      while (resultsIt.hasNext()) {
-        final ValidationResult currentResult = resultsIt.next();
-        if (currentExpectation.matches(currentResult)) {
-          expectationIt.remove();
-          resultsIt.remove();
-          continue outerLoop;
-        }
-      }
-    }
-  }
-
-  private void failWith(
-      final List<ExpectedValidationResult> unmatchedExpectations,
-      final List<ValidationResult> unmatchedResults) {
-    final StringBuilder sb = new StringBuilder();
-    sb.append("Not all expecations were matched by results (or vice versa)\n\n");
-    describeUnmatchedExpectations(sb, unmatchedExpectations);
-    sb.append("\n");
-    describeUnmatchedResults(sb, unmatchedResults);
-    fail(sb.toString());
-  }
-
-  private static void describeUnmatchedResults(
-      final StringBuilder sb, final List<ValidationResult> results) {
-    sb.append("Unmatched results:\n");
-    results.forEach(
-        e -> {
-          sb.append(ExpectedValidationResult.toString(e));
-          sb.append("\n");
-        });
-  }
-
-  private static void describeUnmatchedExpectations(
-      final StringBuilder sb, final List<ExpectedValidationResult> expectations) {
-    sb.append("Unmatched expectations:\n");
-    expectations.forEach(
-        e -> {
-          sb.append(e);
-          sb.append("\n");
-        });
   }
 }
